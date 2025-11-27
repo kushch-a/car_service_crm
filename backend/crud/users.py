@@ -19,6 +19,17 @@ def verify_password(plain_password, hashed_password) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 async def create_user(db: AsyncConnection, user: UserCreate) -> UserInDB:
+    # Перевірка на існування користувача
+    existing_user = await get_user_by_username(db, user.username)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    # Можна додати і перевірку email, якщо потрібно
+    # query_email = "SELECT id FROM users WHERE email = :email"
+    # existing_email = await db.fetch_one(query_email, {"email": user.email})
+    # if existing_email:
+    #     raise HTTPException(status_code=400, detail="Email already registered")
+
     hashed_password = get_password_hash(user.password)
     query = """
         INSERT INTO users (username, email, role, password_hash, created_at, updated_at)
@@ -107,4 +118,4 @@ async def update_user_in_db(db, user_id: int, user_update):
 
 async def delete_user_from_db(db, user_id: int):
     query = "DELETE FROM users WHERE id = :user_id"
-    await db.execute(query, {"user_id": user_id}) 
+    await db.execute(query, {"user_id": user_id})
