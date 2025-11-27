@@ -56,15 +56,18 @@ app.add_middleware(
 
 # Підключення роутерів
 app.include_router(customers.router)
-app.include_router(customers.router)
 app.include_router(cars.router)
 app.include_router(services.router)
 app.include_router(auth.router)
 app.include_router(invoices.router)
 app.include_router(invoice_items.router)
 app.include_router(users.router)
+
 # Головна перевірка API
 @app.get("/")
 async def root():
     return {"message": "CRM API is running"}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
