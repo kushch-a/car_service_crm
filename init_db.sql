@@ -1,5 +1,7 @@
 -- DROP all tables if they exist to avoid conflicts
 DROP TABLE IF EXISTS invoice_items, invoices, service_records, services, cars, customers, users CASCADE;
+-- DROP the ENUM type if it exists
+DROP TYPE IF EXISTS payment_status_enum;
 
 -- Create Users table
 CREATE TABLE users (
