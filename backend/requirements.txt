@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+databases
+asyncpg
+sqlalchemy
+passlib[bcrypt]
+python-jose
+pydantic
+email-validator
