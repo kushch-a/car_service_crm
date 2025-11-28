@@ -7,19 +7,27 @@ async def get_car_by_id(db: AsyncConnection, car_id: int) -> Optional[CarInDB]:
     row = await db.fetch_one(query, {"id": car_id})
     return CarInDB(**dict(row)) if row else None
 
-async def get_all_cars(db: AsyncConnection) -> List[CarInDB]:
-    query = "SELECT * FROM cars ORDER BY id"
-    rows = await db.fetch_all(query)
+async def get_all_cars(db: AsyncConnection, customer_id: Optional[int] = None) -> List[CarInDB]:
+    """
+    Отримує список машин. Якщо вказано customer_id, фільтрує за ним.
+    """
+    if customer_id:
+        query = "SELECT * FROM cars WHERE customer_id = :customer_id ORDER BY id"
+        rows = await db.fetch_all(query, {"customer_id": customer_id})
+    else:
+        query = "SELECT * FROM cars ORDER BY id"
+        rows = await db.fetch_all(query)
+        
     return [CarInDB(**dict(row)) for row in rows]
 
 async def create_car(db: AsyncConnection, car: CarCreate) -> CarInDB:
     query = "INSERT INTO cars (customer_id, brand, model, year, vin) VALUES (:customer_id, :brand, :model, :year, :vin) RETURNING *"
-    row = await db.fetch_one(query, car.dict())
+    row = await db.fetch_one(query, car.model_dump())
     return CarInDB(**dict(row))
 
 async def update_car(db: AsyncConnection, car_id: int, car: CarUpdate) -> Optional[CarInDB]:
     query = "UPDATE cars SET customer_id = :customer_id, brand = :brand, model = :model, year = :year, vin = :vin, updated_at = CURRENT_TIMESTAMP WHERE id = :id RETURNING *"
-    row = await db.fetch_one(query, {**car.dict(), "id": car_id})
+    row = await db.fetch_one(query, {**car.model_dump(), "id": car_id})
     return CarInDB(**dict(row)) if row else None
 
 async def delete_car(db: AsyncConnection, car_id: int) -> bool:

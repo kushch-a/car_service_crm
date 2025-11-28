@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncConnection
-from typing import List
+from typing import List, Optional
 from db import get_db
 from schemas.cars import CarCreate, CarUpdate, CarInDB
 from crud.cars import (
@@ -13,8 +13,11 @@ router = APIRouter(
 )
 
 @router.get("/", response_model=List[CarInDB])
-async def read_cars(db: AsyncConnection = Depends(get_db)):
-    return await get_all_cars(db)
+async def read_cars(customer_id: Optional[int] = None, db: AsyncConnection = Depends(get_db)):
+    """
+    Отримує список всіх машин, або фільтрує їх за customer_id, якщо він вказаний.
+    """
+    return await get_all_cars(db, customer_id=customer_id)
 
 @router.get("/{car_id}", response_model=CarInDB)
 async def read_car(car_id: int, db: AsyncConnection = Depends(get_db)):
