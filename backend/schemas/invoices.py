@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import ConfigDict, BaseModel
 from typing import Optional
 from datetime import datetime
 from decimal import Decimal
@@ -32,5 +32,4 @@ class InvoiceInDB(InvoiceBase):
     due_date: Optional[datetime]
     created_by: Optional[int]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
