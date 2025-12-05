@@ -22,6 +22,9 @@ jobs:
   # --- 1. CI для Бекенду ---
   test-backend:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/test_db"
+
     steps:
       - uses: actions/checkout@v4
 
