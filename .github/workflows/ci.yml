@@ -4,22 +4,34 @@ on:
   push:
     branches: [ "main" ]
     tags: [ 'v*.*.*' ]
+    # ОПТИМІЗАЦІЯ: Не запускати CI, якщо змінено лише документацію
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
     branches: [ "main" ]
+    # Аналогічно для PR
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
 
-
+# STYLE POINT: Concurrency з cancel-in-progress
+# Скасовує попередні запущені джоби в тій самій гілці, якщо прилетів новий коміт
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test-backend:
     runs-on: ubuntu-latest
+    # Timeout, щоб джоба не висіла вічно (вимога з розділу "Можливі проблеми")
+    timeout-minutes: 10
 
     services:
       postgres:
@@ -46,10 +58,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          # ОПТИМІЗАЦІЯ: Кешування pip пакетів
           cache: 'pip'
 
       - name: Install dependencies
-        # 👇 Додаємо psycopg2-binary, якщо він раптом не в requirements
         run: |
           pip install -r backend/requirements.txt
           pip install pytest httpx psycopg2-binary
@@ -57,10 +69,9 @@ jobs:
       - name: Run Tests
         run: pytest backend/tests/
 
-
-  # --- 2. CI для Фронтенду ---
   build-frontend-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -68,6 +79,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          # ОПТИМІЗАЦІЯ: Кешування npm модулів
           cache: 'npm'
           cache-dependency-path: sto-crm-frontend/package-lock.json
 
@@ -76,16 +88,13 @@ jobs:
         run: npm ci
 
       - name: Build Check
-        # Це перевірить, чи фронтенд взагалі збирається (CI)
         working-directory: ./sto-crm-frontend
         run: npm run build
 
-  # --- 3. Delivery (CD) - Збірка та Публікація ---
   push-images:
-    # Запускаємо тільки якщо тести пройшли
     needs: [test-backend, build-frontend-check]
     runs-on: ubuntu-latest
-    # Style Point 2: Minimized Permissions
+    # STYLE POINT: Minimized Permissions
     permissions:
       contents: read
       packages: write
@@ -110,7 +119,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Style Point 3: Semantic Tagging (sha, branch, latest)
+      # STYLE POINT: Semantic Tagging
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
