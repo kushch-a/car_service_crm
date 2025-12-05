@@ -37,7 +37,7 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: "postgresql://postgres:password@localhost:5432/test_db"
+      DATABASE_URL: "postgresql://sto_user:sto_pass@localhost:5432/sto_crm"
 
     steps:
       - uses: actions/checkout@v4
