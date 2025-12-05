@@ -7,19 +7,15 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# Style Point 1: Concurrency
-# Скасовує попередній запуск, якщо ви запушили новий код у ту ж гілку
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-  # image name має бути в нижньому регістрі
-  IMAGE_NAME: ${{ github.repository }}
-Тут дві різні проблеми. Попередження (warnings) про Pydantic — це "косметика", а от помилки OSError: [Errno 111] Connect call failed — це критична помилка, через яку падають тести.
 
-Тести намагаються підключитися до PostgreSQL на порту 5432, але в середовищі GitHub Actions немає запущеної бази даних. Ваша попередня спроба з sqlite:///:memory: не спрацювала (ймовірно, тому що ваш код бекенду жорстко прив'язаний до драйвера PostgreSQL або ігнорує цей URL і використовує дефолтний).
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test-backend:
@@ -29,9 +25,9 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: test_db
+          POSTGRES_USER: sto_user
+          POSTGRES_PASSWORD: sto_pass
+          POSTGRES_DB: sto_crm
         ports:
           - 5432:5432
         options: >-
@@ -40,7 +36,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    # 👇 2. Оновлюємо змінні, щоб код підключався до цього сервісу
     env:
       DATABASE_URL: "postgresql://postgres:password@localhost:5432/test_db"
 
