@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 
 class UserBase(BaseModel):
@@ -10,8 +10,7 @@ class User(UserBase):
     id: int
     is_active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UserCreate(UserBase):
     password: str
@@ -32,11 +31,10 @@ class UserInDB(BaseModel):
     role: str
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
-    is_active: Optional[bool] = None 
+    is_active: Optional[bool] = None
