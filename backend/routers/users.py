@@ -17,6 +17,13 @@ router = APIRouter(
 async def get_users(db: AsyncConnection = Depends(get_db)):
     return await get_all_users(db)
 
+@router.get("/error")
+async def trigger_error():
+    """
+    This endpoint is for testing purposes and will always raise a 500 error.
+    """
+    raise HTTPException(status_code=500, detail="test error")
+
 @router.post("/", response_model=UserInDB, status_code=201)
 async def create_new_user(
     request: Request,

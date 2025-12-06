@@ -1,5 +1,9 @@
 version: "3.9"
 
+networks:
+  sto-crm-net:
+    driver: bridge
+
 services:
   db:
     image: postgres:15
@@ -13,6 +17,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    networks:
+      - sto-crm-net
 
   backend:
     build:
@@ -21,12 +27,17 @@ services:
     depends_on:
       - db
     environment:
-      DATABASE_URL: postgres://sto_user:sto_pass@db:5432/sto_crm
+      - OTEL_SERVICE_NAME=sto-crm-backend
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - DATABASE_URL=postgres://sto_user:sto_pass@db:5432/sto_crm
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - ./data/logs:/app/logs
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --no-access-log
+    networks:
+      - sto-crm-net
 
   frontend:
     build:
@@ -38,9 +49,80 @@ services:
       - backend
     environment:
       - REACT_APP_API_URL=http://localhost:8000
-    # volumes:
-    #   - ./sto-crm-frontend:/app
+    volumes:
+      - ./sto-crm-frontend:/app
+      - /app/node_modules
     command: ["npm", "run", "dev"]
+    networks:
+      - sto-crm-net
+
+  load-generator:
+    build:
+      context: ./load_generator
+    depends_on:
+      - backend
+    networks:
+      - sto-crm-net
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.98.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability-demo/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4318:4318"
+      - "4317:4317"
+      - "8889:8889"
+    depends_on:
+      - tempo
+      - loki
+    networks:
+      - sto-crm-net
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./observability-demo/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - sto-crm-net
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./observability-demo/tempo.yaml:/etc/tempo.yaml:ro
+    ports:
+      - "3200:3200"
+      - "4319:4317"
+    networks:
+      - sto-crm-net
+
+  loki:
+    image: grafana/loki:2.9.4
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes:
+      - ./observability-demo/loki-config.yaml:/etc/loki/local-config.yaml:ro
+    ports:
+      - "3100:3100"
+    networks:
+      - sto-crm-net
+
+  grafana:
+    image: grafana/grafana:10.4.5
+    volumes:
+      - ./observability-demo/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    networks:
+      - sto-crm-net
 
 volumes:
   postgres_data:

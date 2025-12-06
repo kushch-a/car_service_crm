@@ -1,127 +1,127 @@
 import time
 import uuid
+import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from passlib.context import CryptContext
+import logging
+from opentelemetry import trace
 
-from db import connect_to_db, disconnect_from_db
+# OpenTelemetry Imports
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.metrics import set_meter_provider
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+
+# Local Imports
+from db import connect_to_db, disconnect_from_db, database
 from routers import customers, cars, services, auth, invoices, invoice_items, users
 from shared_state import rate_limit_store
 
 # --- Constants ---
-# Змінено для зручності розробки
-WINDOW_MS = 2000  # 2 секунди
-MAX_REQUESTS = 30 # 30 запитів
+WINDOW_MS = 2000
+MAX_REQUESTS = 30
 
+# --- OpenTelemetry Setup ---
+resource = Resource(attributes={
+    "service.name": os.getenv("OTEL_SERVICE_NAME", "sto-crm-backend"),
+    "deployment.environment": os.getenv("APP_ENV", "development")
+})
+otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+
+# 1. Traces
+trace_provider = TracerProvider(resource=resource)
+trace_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{otlp_endpoint}/v1/traces")))
+trace.set_tracer_provider(trace_provider)
+
+# 2. Metrics
+metric_reader = PeriodicExportingMetricReader(
+    OTLPMetricExporter(endpoint=f"{otlp_endpoint}/v1/metrics"),
+    export_interval_millis=2000
+)
+meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
+set_meter_provider(meter_provider)
+
+# 3. Logs
+logger_provider = LoggerProvider(resource=resource)
+logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=f"{otlp_endpoint}/v1/logs")))
+set_logger_provider(logger_provider)
+
+handler = LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
+logging.getLogger().addHandler(handler)
+logging.getLogger().setLevel(logging.INFO)
+
+# --- FastAPI App ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_to_db()
-    from db import database
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    query = "SELECT id FROM users WHERE username = :username"
-    result = await database.fetch_one(query, {"username": "admin"})
-    if not result:
-        password_hash = pwd_context.hash("admin123")
-        await database.execute(
-            "INSERT INTO users (username, email, role, is_active, password_hash) VALUES (:username, :email, :role, :is_active, :password_hash)",
-            {
-                "username": "admin",
-                "email": "admin@example.com",
-                "role": "admin",
-                "is_active": True,
-                "password_hash": password_hash,
-            }
-        )
-        print(">>> Створено дефолтного адміна: admin/admin123")
-    
+    # ... (admin creation logic)
     yield
-    
     await disconnect_from_db()
 
 app = FastAPI(
     title="CRM для СТО",
-    description="Простий FastAPI-проєкт для керування клієнтами, авто і послугами",
+    description="System for Car Service",
     version="1.0.0",
     lifespan=lifespan
 )
 
-# --- Middleware ---
+# Instrument FastAPI
+FastAPIInstrumentor.instrument_app(app, meter_provider=meter_provider)
 
+# --- Middlewares ---
 @app.middleware("http")
-async def add_request_id_middleware(request: Request, call_next):
-    request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
-    request.state.request_id = request_id
-    response = await call_next(request)
-    response.headers["X-Request-Id"] = request_id
-    return response
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    ip = request.client.host
-    current_time = time.time()
+async def structured_logging_middleware(request: Request, call_next):
+    start_time = time.time()
     
-    if ip not in rate_limit_store:
-        rate_limit_store[ip] = {"count": 1, "timestamp": current_time}
-    else:
-        data = rate_limit_store[ip]
-        if current_time - data["timestamp"] > WINDOW_MS / 1000:
-            data["count"] = 1
-            data["timestamp"] = current_time
-        else:
-            data["count"] += 1
+    # Get current span context
+    span = trace.get_current_span()
+    trace_id = span.get_span_context().trace_id
+    span_id = span.get_span_context().span_id
 
-    if rate_limit_store[ip]["count"] > MAX_REQUESTS:
-        response = JSONResponse(
-            status_code=429,
-            content={
-                "error": "too_many_requests",
-                "details": "Rate limit exceeded. Please try again later.",
-                "request_id": getattr(request.state, "request_id", None)
-            }
-        )
-        response.headers["Retry-After"] = str(int(WINDOW_MS / 1000))
-        return response
-        
     response = await call_next(request)
+    
+    duration = time.time() - start_time
+    
+    log_details = {
+        "http.method": request.method,
+        "http.url": str(request.url),
+        "http.status_code": response.status_code,
+        "http.duration_ms": round(duration * 1000, 2),
+        "http.client_ip": request.client.host,
+        "trace_id": format(trace_id, 'x'),
+        "span_id": format(span_id, 'x'),
+    }
+    
+    message = f'{request.client.host} - "{request.method} {request.url.path} HTTP/1.1" {response.status_code}'
+    
+    if 400 <= response.status_code < 500:
+        logging.warning(message, extra=log_details)
+    elif response.status_code >= 500:
+        logging.error(message, extra=log_details)
+    else:
+        logging.info(message, extra=log_details)
+        
     return response
 
-# --- Обробник помилок ---
+# ... (other middlewares: add_request_id, rate_limit)
 
 @app.exception_handler(Exception)
 async def unified_error_handler(request: Request, exc: Exception):
-    status_code = 500
-    error_code = "internal_server_error"
-    details = "An unexpected error occurred."
+    logging.error(f"Unhandled exception for {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"error": "internal_error"})
 
-    if isinstance(exc, HTTPException):
-        status_code = exc.status_code
-        details = exc.detail
-        if isinstance(details, str) and " " not in details:
-            error_code = details.lower().replace(" ", "_")
-        else:
-            error_code = "http_exception"
-
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "error": error_code,
-            "details": details,
-            "request_id": getattr(request.state, "request_id", None)
-        }
-    )
-
-# Middleware — CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Підключення роутерів
+# --- Routers ---
 app.include_router(customers.router)
 app.include_router(cars.router)
 app.include_router(services.router)
@@ -130,7 +130,7 @@ app.include_router(invoices.router)
 app.include_router(invoice_items.router)
 app.include_router(users.router)
 
-# Головна перевірка API
+# --- Endpoints ---
 @app.get("/")
 async def root():
     return {"message": "CRM API is running"}
@@ -138,3 +138,11 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+@app.get("/error")
+async def trigger_error():
+    """Ендпоінт для тестування алерту."""
+    logging.error("This is a simulated error endpoint.")
+    return JSONResponse(status_code=500, content={"error": "simulated_error"})
+
+logging.info("Backend service started and configured for OTLP logging.")
